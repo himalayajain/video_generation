@@ -1,0 +1,4 @@
+model_name: ltx_video
+checkpoint: path/to/your/checkpoint
+dtype: fp16
+device_map: auto
