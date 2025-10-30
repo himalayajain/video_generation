@@ -1,0 +1,4 @@
+model_name: wan21_model
+checkpoint: Wan-AI/Wan2.1-T2V-14B-Diffusers
+dtype: fp16
+device_map: balanced
