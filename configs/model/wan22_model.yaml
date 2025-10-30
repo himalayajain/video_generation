@@ -1,4 +1,4 @@
 model_name: wan22_model
-checkpoint: path/to/your/checkpoint
-dtype: fp16
-device_map: auto
+checkpoint: Wan-AI/Wan2.2-TI2V-5B-Diffusers
+dtype: bf16
+device_map: cuda

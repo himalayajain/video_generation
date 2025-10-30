@@ -1,59 +1,46 @@
 import torch
 from diffusers import AnimateDiffPipeline, DDIMScheduler, MotionAdapter
-from diffusers.utils import export_to_gif, export_to_video
+from diffusers.utils import export_to_video
+from omegaconf import DictConfig
 
+from models.base_model import BaseModel
 
-# New, recommended code
-import imageio
+class AnimateDiffModel(BaseModel):
+    def __init__(self, model_config: DictConfig):
+        super().__init__(model_config)
+        self.pipeline = self._load_pipeline()
 
-# The 'frames' variable is a list of NumPy arrays or PIL Images
-# Ensure imageio-ffmpeg is installed with `pip install imageio[ffmpeg]`
+    def _load_pipeline(self):
+        """Loads the pre-trained pipeline."""
+        adapter = MotionAdapter.from_pretrained("guoyww/animatediff-motion-adapter-v1-5-2", torch_dtype=torch.float16)
+        pipe = AnimateDiffPipeline.from_pretrained(
+            self.model_config.model.checkpoint,
+            motion_adapter=adapter,
+            torch_dtype=torch.float16
+        )
+        scheduler = DDIMScheduler.from_pretrained(
+            self.model_config.model.checkpoint,
+            subfolder="scheduler",
+            clip_sample=False,
+            timestep_spacing="linspace",
+            beta_schedule="linear",
+            steps_offset=1,
+        )
+        pipe.scheduler = scheduler
+        pipe.enable_vae_slicing()
+        pipe.enable_model_cpu_offload()
+        return pipe
 
-def custom_export_to_video(frames, filename, fps=16):
-# Use imageio.get_writer to create a video file
-    with imageio.get_writer(filename, fps=fps) as writer:
-        for frame in frames:
-            writer.append_data(frame)
-    print(f"Video saved to {filename}")
-
-# Load the motion adapter
-adapter = MotionAdapter.from_pretrained("guoyww/animatediff-motion-adapter-v1-5-2", torch_dtype=torch.float16)
-# load SD 1.5 based finetuned model
-model_id = "SG161222/Realistic_Vision_V5.1_noVAE"
-pipe = AnimateDiffPipeline.from_pretrained(model_id, motion_adapter=adapter, torch_dtype=torch.float16)
-scheduler = DDIMScheduler.from_pretrained(
-    model_id,
-    subfolder="scheduler",
-    clip_sample=False,
-    timestep_spacing="linspace",
-    beta_schedule="linear",
-    steps_offset=1,
-)
-pipe.scheduler = scheduler
-
-# enable memory savings
-pipe.enable_vae_slicing()
-pipe.enable_model_cpu_offload()
-
-output = pipe(
-    # prompt=(
-    #     "masterpiece, bestquality, highlydetailed, ultradetailed, sunset, "
-    #     "orange sky, warm lighting, fishing boats, ocean waves seagulls, "
-    #     "rippling water, wharf, silhouette, serene atmosphere, dusk, evening glow, "
-    #     "golden hour, coastal landscape, seaside scenery"
-    # ),
-    prompt=(
-        "masterpiece, best quality, highly detailed, "
-        "dynamic action shot of a small, adorable fluffy calico cat, "
-        "Sunlit living room, soft morning light, "
-        "shallow depth of field, sharp focus on the cat."
-    ),
-    negative_prompt="bad quality, worse quality",
-    num_frames=16,
-    guidance_scale=7.5,
-    num_inference_steps=25,
-    generator=torch.Generator("cpu").manual_seed(42),
-)
-frames = output.frames[0]
-export_to_gif(frames, "animation.gif")
-export_to_video(frames, "output.mp4", fps=16)
+    def generate(self, prompts: dict, output_path: str) -> None:
+        """Generates a video based on the provided prompts."""
+        output = self.pipeline(
+            prompt=prompts.get("positive", ""),
+            negative_prompt=prompts.get("negative", ""),
+            num_frames=self.model_config.num_frames,
+            guidance_scale=7.5,
+            num_inference_steps=25,
+            generator=torch.Generator("cpu").manual_seed(42),
+        ).frames[0]
+        
+        export_to_video(output, output_path, fps=16)
+        print(f"Video saved to {output_path}")

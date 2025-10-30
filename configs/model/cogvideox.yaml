@@ -1,4 +1,4 @@
 model_name: cogvideox
-checkpoint: path/to/your/checkpoint
+checkpoint: THUDM/CogVideoX-2B
 dtype: fp16
-device_map: auto
+device_map: balanced

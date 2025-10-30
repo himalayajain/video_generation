@@ -2,57 +2,52 @@ import torch
 from diffusers import AutoencoderKLCogVideoX, CogVideoXTransformer3DModel, CogVideoXImageToVideoPipeline
 from diffusers.utils import export_to_video, load_image
 from transformers import T5EncoderModel
-# torchao is no longer needed for this approach
-# from torchao.quantization import quantize_, int8_weight_only
+from omegaconf import DictConfig
 
-# Using float16 is best for V100 GPUs
-dtype = torch.bfloat16
+from models.base_model import BaseModel
 
-# --- Load models WITHOUT quantization ---
-print("Loading models (without quantization)...")
-text_encoder = T5EncoderModel.from_pretrained("THUDM/CogVideoX-5b-I2V", subfolder="text_encoder", torch_dtype=dtype)
-transformer = CogVideoXTransformer3DModel.from_pretrained("THUDM/CogVideoX-5b-I2V", subfolder="transformer", torch_dtype=dtype)
-vae = AutoencoderKLCogVideoX.from_pretrained("THUDM/CogVideoX-5b-I2V", subfolder="vae", torch_dtype=dtype)
-print("Models loaded.")
+class CogVideoXModel(BaseModel):
+    def __init__(self, model_config: DictConfig):
+        super().__init__(model_config)
+        self.pipeline = self._load_pipeline()
 
-# --- Create the pipeline ---
-# Notice we are now passing the full-precision models
-pipe = CogVideoXImageToVideoPipeline.from_pretrained(
-    "THUDM/CogVideoX-5b-I2V",
-    text_encoder=text_encoder,
-    transformer=transformer,
-    vae=vae,
-    torch_dtype=dtype,
-)
+    def _load_pipeline(self):
+        """Loads the pre-trained pipeline."""
+        dtype = torch.bfloat16 if self.model_config.model.dtype == 'bf16' else torch.float16
+        
+        text_encoder = T5EncoderModel.from_pretrained(self.model_config.model.checkpoint, subfolder="text_encoder", torch_dtype=dtype)
+        transformer = CogVideoXTransformer3DModel.from_pretrained(self.model_config.model.checkpoint, subfolder="transformer", torch_dtype=dtype)
+        vae = AutoencoderKLCogVideoX.from_pretrained(self.model_config.model.checkpoint, subfolder="vae", torch_dtype=dtype)
 
-# --- APPLY MEMORY-SAVING OPTIMIZATIONS ---
-# This will now work because the models use standard PyTorch tensors
-pipe.enable_sequential_cpu_offload()
+        pipe = CogVideoXImageToVideoPipeline.from_pretrained(
+            self.model_config.model.checkpoint,
+            text_encoder=text_encoder,
+            transformer=transformer,
+            vae=vae,
+            torch_dtype=dtype,
+        )
+        pipe.enable_sequential_cpu_offload()
+        pipe.vae.enable_tiling()
+        pipe.vae.enable_slicing()
+        return pipe
 
-# VAE tiling is still a good idea
-pipe.vae.enable_tiling()
-pipe.vae.enable_slicing()
+    def generate(self, prompts: dict, output_path: str) -> None:
+        """Generates a video based on the provided prompts."""
+        # This model requires a specific image, we'll load it here.
+        # In a more advanced implementation, this could be specified in the config.
+        image = load_image("input_smaller.jpg").resize((self.model_config.width, self.model_config.height))
 
-print("Running inference...")
-prompt = "A little girl is riding a bicycle at high speed. Focused, detailed, realistic."
-image = load_image("input_smaller.jpg") 
-
-# CRITICAL: Keep the number of frames reasonable. Offloading helps, but isn't magic.
-# Start with 24 and see if it works.
-num_frames_to_generate = 24 
-
-torch.cuda.empty_cache()
-
-# --- Run Inference ---
-video = pipe(
-    prompt=prompt,
-    image=image,
-    num_videos_per_prompt=1,
-    num_inference_steps=50,
-    num_frames=num_frames_to_generate,
-    guidance_scale=6,
-    generator=torch.Generator(device="cuda").manual_seed(42),
-).frames[0]
-
-export_to_video(video, "output.mp4", fps=8)
-print(f"Successfully generated 'output.mp4' with {num_frames_to_generate} frames.")
+        output = self.pipeline(
+            prompt=prompts.get("positive", ""),
+            image=image,
+            height=self.model_config.height,
+            width=self.model_config.width,
+            num_videos_per_prompt=1,
+            num_inference_steps=50,
+            num_frames=self.model_config.num_frames,
+            guidance_scale=6,
+            generator=torch.Generator(device="cuda").manual_seed(42),
+        ).frames[0]
+        
+        export_to_video(output, output_path, fps=8)
+        print(f"Video saved to {output_path}")

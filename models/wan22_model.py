@@ -1,36 +1,35 @@
 import torch
-import numpy as np
-from diffusers import WanPipeline, AutoencoderKLWan, WanTransformer3DModel, UniPCMultistepScheduler
-from diffusers.utils import export_to_video, load_image
+from diffusers import WanPipeline, AutoencoderKLWan
+from diffusers.utils import export_to_video
+from omegaconf import DictConfig
 
-dtype = torch.bfloat16
-device = "cuda"
+from models.base_model import BaseModel
 
-model_id = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
-vae = AutoencoderKLWan.from_pretrained(model_id, subfolder="vae", torch_dtype=torch.float32)
-pipe = WanPipeline.from_pretrained(model_id, vae=vae, torch_dtype=dtype)
-pipe.to(device)
+class Wan22Model(BaseModel):
+    def __init__(self, model_config: DictConfig):
+        super().__init__(model_config)
+        self.pipeline = self._load_pipeline()
 
-height = 704
-width = 1280
-num_frames = 121
-num_inference_steps = 50
-guidance_scale = 5.0
+    def _load_pipeline(self):
+        """Loads the pre-trained pipeline."""
+        dtype = torch.bfloat16 if self.model_config.model.dtype == 'bf16' else torch.float16
+        
+        vae = AutoencoderKLWan.from_pretrained(self.model_config.model.checkpoint, subfolder="vae", torch_dtype=torch.float32)
+        pipe = WanPipeline.from_pretrained(self.model_config.model.checkpoint, vae=vae, torch_dtype=dtype)
+        pipe.to(self.model_config.model.device_map)
+        return pipe
 
-
-prompt = "Two anthropomorphic cats in comfy boxing gear and bright gloves fight intensely on a spotlighted stage."
-negative_prompt = """
-Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, 
-low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, 
-misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards
-"""
-output = pipe(
-    prompt=prompt,
-    negative_prompt=negative_prompt,
-    height=height,
-    width=width,
-    num_frames=num_frames,
-    guidance_scale=guidance_scale,
-    num_inference_steps=num_inference_steps,
-).frames[0]
-export_to_video(output, "5bit2v_output.mp4", fps=24)
+    def generate(self, prompts: dict, output_path: str) -> None:
+        """Generates a video based on the provided prompts."""
+        output = self.pipeline(
+            prompt=prompts.get("positive", ""),
+            negative_prompt=prompts.get("negative", ""),
+            height=self.model_config.height,
+            width=self.model_config.width,
+            num_frames=self.model_config.num_frames,
+            guidance_scale=5.0,
+            num_inference_steps=50,
+        ).frames[0]
+        
+        export_to_video(output, output_path, fps=24)
+        print(f"Video saved to {output_path}")

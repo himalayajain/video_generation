@@ -1,4 +1,4 @@
 model_name: animatediff
-checkpoint: path/to/your/checkpoint
+checkpoint: runwayml/stable-diffusion-v1-5
 dtype: fp16
-device_map: auto
+device_map: balanced

@@ -1,4 +1,4 @@
 model_name: ltx_video_cake
-checkpoint: path/to/your/checkpoint
+checkpoint: stabilityai/stable-video-diffusion-img2vid-xt
 dtype: fp16
-device_map: auto
+device_map: balanced

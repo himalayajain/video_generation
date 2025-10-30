@@ -13,10 +13,10 @@ class Wan21Model(BaseModel):
     def _load_pipeline(self):
         """Loads the pre-trained pipeline."""
         return WanPipeline.from_pretrained(
-            self.model_config.checkpoint,
-            torch_dtype=torch.bfloat16 if self.model_config.dtype == 'bf16' else torch.float16,
+            self.model_config.model.checkpoint,
+            torch_dtype=torch.bfloat16 if self.model_config.model.dtype == 'bf16' else torch.float16,
             low_cpu_mem_usage=True,
-            device_map=self.model_config.device_map
+            device_map=self.model_config.model.device_map
         )
 
     def generate(self, prompts: dict, output_path: str) -> None:
@@ -24,7 +24,9 @@ class Wan21Model(BaseModel):
         output = self.pipeline(
             prompt=prompts.get("positive", ""),
             negative_prompt=prompts.get("negative", ""),
-            num_frames=81,
+            num_frames=self.model_config.num_frames,
+            width=self.model_config.width,
+            height=self.model_config.height,
             guidance_scale=5.0,
         ).frames[0]
         

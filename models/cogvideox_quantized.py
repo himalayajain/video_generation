@@ -1,49 +1,59 @@
-# To get started, PytorchAO needs to be installed from the GitHub source and PyTorch Nightly.
-# Source and nightly installation is only required until the next release.
-
 import torch
 from diffusers import AutoencoderKLCogVideoX, CogVideoXTransformer3DModel, CogVideoXImageToVideoPipeline
 from diffusers.utils import export_to_video, load_image
 from transformers import T5EncoderModel
 from torchao.quantization import quantize_, int8_weight_only
+from omegaconf import DictConfig
 
-quantization = int8_weight_only
+from models.base_model import BaseModel
 
-text_encoder = T5EncoderModel.from_pretrained("THUDM/CogVideoX-5b-I2V", subfolder="text_encoder", dtype=torch.bfloat16)
-quantize_(text_encoder, quantization())
+class CogVideoXQuantizedModel(BaseModel):
+    def __init__(self, model_config: DictConfig):
+        super().__init__(model_config)
+        self.pipeline = self._load_pipeline()
 
-transformer = CogVideoXTransformer3DModel.from_pretrained("THUDM/CogVideoX-5b-I2V",subfolder="transformer", torch_dtype=torch.bfloat16)
-quantize_(transformer, quantization())
+    def _load_pipeline(self):
+        """Loads the pre-trained pipeline."""
+        quantization = int8_weight_only
+        dtype = torch.bfloat16 if self.model_config.model.dtype == 'bf16' else torch.float16
 
-vae = AutoencoderKLCogVideoX.from_pretrained("THUDM/CogVideoX-5b-I2V", subfolder="vae", torch_dtype=torch.bfloat16)
-quantize_(vae, quantization())
+        text_encoder = T5EncoderModel.from_pretrained(self.model_config.model.checkpoint, subfolder="text_encoder", torch_dtype=dtype)
+        quantize_(text_encoder, quantization())
 
-# Create pipeline and run inference
-pipe = CogVideoXImageToVideoPipeline.from_pretrained(
-    "THUDM/CogVideoX-5b-I2V",
-    text_encoder=text_encoder,
-    transformer=transformer,
-    vae=vae,
-    torch_dtype=torch.bfloat16,
-)
+        transformer = CogVideoXTransformer3DModel.from_pretrained(self.model_config.model.checkpoint,subfolder="transformer", torch_dtype=dtype)
+        quantize_(transformer, quantization())
 
-# pipe.enable_sequential_cpu_offload()
-pipe.enable_model_cpu_offload()
-pipe.vae.enable_tiling()
-pipe.vae.enable_slicing()
-pipe.transformer.enable_attention_slicing()
+        vae = AutoencoderKLCogVideoX.from_pretrained(self.model_config.model.checkpoint, subfolder="vae", torch_dtype=dtype)
+        quantize_(vae, quantization())
 
-prompt = "A little girl is riding a bicycle at high speed. Focused, detailed, realistic."
-image = load_image(image="input_smaller.jpg")
-video = pipe(
-    prompt=prompt,
-    image=image,
-    num_videos_per_prompt=1,
-    num_inference_steps=50,
-    num_frames=49,
-    guidance_scale=6,
-    generator=torch.Generator(device="cuda").manual_seed(42),
-).frames[0]
+        pipe = CogVideoXImageToVideoPipeline.from_pretrained(
+            self.model_config.model.checkpoint,
+            text_encoder=text_encoder,
+            transformer=transformer,
+            vae=vae,
+            torch_dtype=dtype,
+        )
+        pipe.enable_model_cpu_offload()
+        pipe.vae.enable_tiling()
+        pipe.vae.enable_slicing()
+        pipe.transformer.enable_attention_slicing()
+        return pipe
 
-export_to_video(video, "output.mp4", fps=8)
-torch.cuda.empty_cache()
+    def generate(self, prompts: dict, output_path: str) -> None:
+        """Generates a video based on the provided prompts."""
+        image = load_image("input_smaller.jpg")
+        
+        output = self.pipeline(
+            prompt=prompts.get("positive", ""),
+            image=image,
+            height=self.model_config.height,
+            width=self.model_config.width,
+            num_videos_per_prompt=1,
+            num_inference_steps=50,
+            num_frames=self.model_config.num_frames,
+            guidance_scale=6,
+            generator=torch.Generator(device="cuda").manual_seed(42),
+        ).frames[0]
+        
+        export_to_video(output, output_path, fps=8)
+        print(f"Video saved to {output_path}")
