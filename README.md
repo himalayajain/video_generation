@@ -13,7 +13,8 @@ This project provides a unified interface for running various text-to-video and 
 2.  Install the required Python packages:
     ```bash
     pip install torch torchvision torchaudio
-    pip install diffusers transformers accelerate imageio imageio-ffmpeg sentencepiece
+    pip install diffusers==0.34.0 transformers==4.56.0 accelerate==1.0.0
+    pip install imageio imageio-ffmpeg sentencepiece
     pip install hydra-core omegaconf
     pip install peft
     pip install ftfy
